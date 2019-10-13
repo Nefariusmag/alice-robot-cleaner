@@ -5,14 +5,27 @@ from __future__ import unicode_literals
 # Импортируем модули для работы с JSON и логами.
 import json
 import logging
-from conf import robot_cleaner
 
 # Импортируем подмодули Flask для запуска веб-сервиса.
 from flask import Flask, request
 
+from conf import whitelist, TOKEN, IP, robot_cleaner
+
 app = Flask(__name__)
 
 logging.basicConfig(level=logging.DEBUG)
+
+import miio
+import threading
+
+
+def initial_connect_to_robot(TOKEN, IP):
+    global robot_cleaner
+    robot_cleaner = miio.vacuum.Vacuum(IP, TOKEN)
+
+
+threading.Timer(300, initial_connect_to_robot, [TOKEN, IP]).start()
+
 
 # Хранилище данных о сессиях.
 sessionStorage = {}
@@ -21,6 +34,7 @@ sessionStorage = {}
 # Задаем параметры приложения Flask.
 @app.route("/", methods=['POST'])
 def main():
+
     # Функция получает тело запроса и возвращает ответ.
     logging.info('Request: %r', request.json)
 
@@ -32,6 +46,9 @@ def main():
         }
     }
 
+    # t = threading.Thread(target=initial_connect_to_robot, args=(TOKEN, IP))
+    # t.start()
+
     handle_dialog(request.json, response)
 
     logging.info('Response: %r', response)
@@ -42,18 +59,22 @@ def main():
         indent=2
     )
 
+# todo использовать request.command чтобы можно было сразу из алисы выполнять команды, а не переходить в навык
+
 
 # Функция для непосредственной обработки диалога.
 def handle_dialog(req, res):
     user_id = req['session']['user_id']
 
-    if user_id != 'AFCB03FF9199C0E7CDDBEFF530E40CBD0C23F62F16F6BE7523D346A533AE4647':
+    if user_id != whitelist:
         res['response']['text'] = 'Тебе сюда вход закрыт'
         return
 
     if req['session']['new']:
         # Это новый пользователь.
         # Инициализируем сессию и поприветствуем его.
+
+
 
         sessionStorage[user_id] = {
             'suggests': [
@@ -71,7 +92,7 @@ def handle_dialog(req, res):
 
         res['response']['text'] = 'Привет! Давай начнем управлять пылесосом, что будем делать?'
         res['response']['buttons'] = get_suggests(user_id)
-        robot_cleaner.status()
+
         return
 
     # Обрабатываем ответ пользователя.
@@ -81,7 +102,6 @@ def handle_dialog(req, res):
     ]:
         # Пользователь дал команду.
         res['response']['text'] = 'Стоп пылесоса!'
-        # todo  не работает остановка пылесоса
         robot_cleaner.pause()
         # return
     elif req['request']['original_utterance'].lower() in [
@@ -114,6 +134,7 @@ def handle_dialog(req, res):
         res['response']['text'] = 'Прости я не знаю команды "%s", выбери среди [старт, стоп, домой, найти]!' % (
             req['request']['original_utterance']
         )
+
     res['response']['buttons'] = get_suggests(user_id)
 
 
@@ -144,4 +165,4 @@ def get_suggests(user_id):
     return suggests
 
 
-app.run()
+app.run(host='0.0.0.0')
